@@ -1,0 +1,104 @@
+Criar imagem docker
+ docker build -t hello-aspnetcore:v1 .
+
+Executar api a partir da imagem docker
+ docker run -it --rm -p 8080:80 -p 8081:443 hello-aspnetcore:v1
+
+Testar acesso local a API
+ http://localhost:8080/weatherforecast
+
+Criar Container Registry no Azure
+ > Home > Create resource > buscar por "Container Registry" > Create
+ > Informar o nome do Resource Group (criar um se não existir)
+ > Informar o nome do Container Registry
+ > Location: Brazil
+ > SKU: Basic
+
+Logar no Azure
+ az login
+
+Verificar se a conta selecionada está correta
+ az account show
+
+Criar Service Principal (an identity for an app or a service)
+ az ad sp create-for-rbac --skip-assignment 
+ resultado:
+    {
+     "appId": "1f32ee18-0d87-44b5-80c2-3dd58b4eefbb",
+     "displayName": "azure-cli-2020-10-15-03-23-33",
+     "name": "http://azure-cli-2020-10-15-03-23-33",
+     "password": "g299eXgZ8~qDVl7.okYlcEQlAlaJsYa-W7",
+     "tenant": "c23e59a8-d873-4c08-b195-5c9a029d2ad6"
+    }
+
+Abrir o Resource Group criado 
+ > Access Control (IAM) 
+ > Add role assignments > select "AcrPull"
+ > No campo "Select" utilizar o displayName retornado pelo comando executado no item anterior (Criar Service Principal)
+ > Save
+
+Criar Kubernetes Service
+ > Home > Create resource > buscar por "Kubernetes Service" > Create
+ > Informar o nome do Resource Group
+ > Criar um Cluster name
+ > Mudar o Node size para B2s e Node count para 1
+ > Authentication > link Configure service principal > usar o appId e password retornado na criação do Service Principal
+ > Desabilitar Container Monitoring 
+ > Create
+
+Push the image into the Container Registry
+> Login into Container Registry: 
+  az acr login --name HelloAspNetCoreCR <-- container registry name
+> Retag the image
+  docker tag hello-aspnetcore:v1 helloaspnetcorecr.azurecr.io/hello-aspnetcore:v1 <-- helloaspnetcorecr.azurecr.io é o "Login server" do Container registry "HelloAspNetCoreCR"
+  docker images to check the new tagged image
+> Push the image
+  docker push helloaspnetcorecr.azurecr.io/hello-aspnetcore:v1
+
+Create the deployment.yml file
+ > set metadata:name: hello-aspnetcore-deployment
+ > set spec:selector:matchLabels:app: hello-aspnetcore-pod
+ > set template:metadata:labels:app: hello-aspnetcore-pod
+ > set spec:containers:-name: hello-aspnetcore-container
+ > set spec:containers:image: helloaspnetcorecr.azurecr.io/hello-aspnetcore:v1
+
+ POD: a group of one or more containers that share a storage or a network, and some specifications how to run the containers
+
+Create the service.yml file
+ > set metadata:name: hello-aspnetcore-service
+ > set spec:selector:app: hello-aspnetcore-pod
+ > set 
+  ports:
+  - port: 8080
+    targetPort: 80
+ > add spect:type: LoadBalancer
+
+Connect to the Cluster, apply the deployment and service
+ > az aks get-credentials --resource-group HelloAspNetCoreRG --name HelloAspNetCoreCluster
+ > Check if it is properly connected
+   kubectl get nodes
+   NAME                                STATUS   ROLES   AGE   VERSION 
+   aks-agentpool-34327993-vmss000000   Ready    agent   19m   v1.17.11
+ > Apply the deployment
+   kubectl apply -f .\deployment.yml
+ > Check the deployment
+   kubectl get deployment
+   NAME                          READY   UP-TO-DATE   AVAILABLE   AGE
+   hello-aspnetcore-deployment   0/1     1            0           19s
+ > Check if the deployment is running
+   kubectl get pods
+   NAME                                           READY   STATUS    RESTARTS   AGE
+   hello-aspnetcore-deployment-778f6c9f7b-pmn7w   1/1     Running   0          70s
+ > Apply the services
+   kubectl apply -f .\service.yml
+ > Check if service was deployed
+   kubectl get services          
+   NAME                       TYPE           CLUSTER-IP    EXTERNAL-IP   PORT(S)          AGE
+   hello-aspnetcore-service   LoadBalancer   10.0.41.252   <pending>     8080:32407/TCP   10s
+   kubernetes                 ClusterIP      10.0.0.1      <none>        443/TCP          26m
+
+   NAME                       TYPE           CLUSTER-IP    EXTERNAL-IP      PORT(S)          AGE  
+   hello-aspnetcore-service   LoadBalancer   10.0.41.252   20.195.163.147   8080:32407/TCP   2m35s (with IP address assigned)
+   kubernetes                 ClusterIP      10.0.0.1      <none>           443/TCP          28m
+ > Test the WEB API running in the AKS
+   http://20.195.163.147:8080/weatherforecast
